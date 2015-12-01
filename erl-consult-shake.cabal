@@ -28,7 +28,8 @@ library
                        filepath,
                        directory,
                        aeson,
-                       unordered-containers
+                       unordered-containers,
+                       vector
 
   hs-source-dirs:      src
   default-language:    Haskell2010

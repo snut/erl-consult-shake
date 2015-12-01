@@ -8,13 +8,14 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
 import qualified Data.Text as Text
+import qualified Data.Vector as V
 
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Either (rights)
 import Data.List (partition)
 import System.FilePath
 import System.Directory (doesFileExist)
-import Control.Arrow (first)
+import Control.Arrow (first, (***))
 
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
@@ -126,7 +127,10 @@ instance ToJSON Deps where
 
 instance ToJSON Dep where
   toJSON (Dep pr t) = Object $ H.fromList [ ("primary", maybe (toJSON $ Text.pack "?") toJSON pr)
-                                          , ("transitive", toJSON (S.toList t)) ]
+                                          , ("transitive", Array $ V.fromList transitiveJSON) ]
+    where
+      transitiveList = S.toList t
+      transitiveJSON = map (uncurry (inject "name") . (toJSON *** toJSON)) transitiveList
 
 instance ToJSON Source where
   toJSON (Source url version) = Object $ H.fromList [("url", toJSON url), ("version", toJSON version)]
@@ -136,3 +140,8 @@ instance ToJSON Version where
   toJSON (Branch b) = Object $ H.singleton "branch" (toJSON b)
   toJSON (Commit h) = Object $ H.singleton "commit" (toJSON h)
   toJSON _ = Object $ H.singleton "unknown" (toJSON $ Text.pack "?")
+
+
+inject :: Text -> Value -> Value -> Value
+inject k v (Object hm) = Object $ H.insert k v hm
+inject _ _ v = v
