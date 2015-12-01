@@ -8,27 +8,28 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
 import qualified Data.Text as Text
-import qualified Data.Vector as V
 
 import Data.Maybe (mapMaybe, catMaybes)
 import Data.Either (rights)
 import Data.List (partition)
 import System.FilePath
 import System.Directory (doesFileExist)
-import Control.Arrow (first, (***))
+import Control.Arrow ( (***) )
 
 import Data.Aeson
 import qualified Data.HashMap.Strict as H
 
+type SourceSet = Set (String, Source)
+
 data Deps = Deps
   { app :: String
-  , backTransitive :: Set (String, Source)
+  , backTransitive :: SourceSet
   , deps :: Map String Dep
   } deriving (Eq, Show)
 
 data Dep = Dep
   { primary :: Maybe Source
-  , transitive :: Set (String, Source)
+  , transitive :: SourceSet
   } deriving (Eq, Show)
 
 data Source = Source
@@ -38,8 +39,9 @@ data Source = Source
 
 data Version = Tag Text | Branch Text | Commit Text | UnknownVersion deriving (Eq, Show, Read, Ord)
 
-directDeps :: String -> [ErlTerm] -> Deps
-directDeps name ts = Deps name S.empty $ depList ts M.empty
+------ Converting erlang terms to typed data ------
+depsFromTerms :: String -> [ErlTerm] -> Deps
+depsFromTerms name ts = Deps name S.empty $ depList ts M.empty
   where
     depList :: [ErlTerm] -> Map String Dep -> Map String Dep
     depList (ErlTuple [ErlAtom dep, ErlString _, ErlTuple [ErlAtom "git", ErlString url, vsn]] : ts) = depList ts . ins
@@ -52,19 +54,14 @@ directDeps name ts = Deps name S.empty $ depList ts M.empty
     version (ErlTuple [ErlAtom "tag", ErlString tag]) = Tag tag
     version (ErlTuple [ErlAtom "branch", ErlString branch]) = Branch branch
     version _ = UnknownVersion
---directDeps _ = Deps $ M.empty
 
 direct :: String -> [ErlTerm] -> Maybe Deps
-direct name (ErlTuple [ErlAtom "deps", ErlList xs] : _) = Just $ directDeps name xs
+direct name (ErlTuple [ErlAtom "deps", ErlList xs] : _) = Just $ depsFromTerms name xs
 direct name (_ : ts) = direct name ts
 direct _    [] = Nothing
 
-maybeInsert :: Ord a => Maybe a -> Set a -> Set a
-maybeInsert Nothing  s = s
-maybeInsert (Just x) s = S.insert x s
-
-depToSet :: String -> Dep -> Set (String, Source)
-depToSet name (Dep pri tra) = maybeInsert ((,) name <$> pri) tra
+depToSet :: String -> Dep -> SourceSet
+depToSet name (Dep pri transitive) = maybe transitive (`S.insert` transitive) $ (,) name <$> pri
 
 -- dirty hack for M.insertWith type-tetris:
 includeTransitive :: Dep -> Dep -> Dep
@@ -80,9 +77,11 @@ addTransitive primary secondary = primary { backTransitive = backTransitive', de
     (backDeps, tranDeps) = partition ((== app primary) . fst) slist
     slist = M.toList (deps secondary)
     sname = app secondary
-  
 
-maybeConsultFile :: FilePath -> IO ( Maybe [ErlTerm] )
+
+------ IO nonsense ------    
+-- | Swallows parsing errors horribly
+maybeConsultFile :: FilePath -> IO (Maybe [ErlTerm])
 maybeConsultFile file = do
   exists <- doesFileExist file
   if exists
@@ -92,7 +91,7 @@ maybeConsultFile file = do
         Right x -> return $ Just x
         Left _  -> return Nothing
     else return Nothing
-        
+
 includeTransitiveDeps :: FilePath -> Deps -> IO Deps
 includeTransitiveDeps libPath primary = do
   let names = M.keys (deps primary)
@@ -108,26 +107,26 @@ fixDeps n path deps = do
     then return deps
     else fixDeps (n-1) path deps'
 
+-- should parse the deps-dir from the rebar file as well (default is 'lib')
 getDeps :: FilePath -> String -> IO (Maybe Deps)
 getDeps path app = do
   primary <- consultFile rebar
   case primary of
    Right terms -> traverse (fixDeps 8 lib) (direct app terms)
-   Left  _     -> return Nothing
+   Left  err   -> putStrLn ("Error during parsing:\n " ++ show err)  >> return Nothing
   where
     lib   = path </> app </> "lib"
     rebar = path </> app </> "rebar.config"
 
-------
-
+------ JSON export ------
 instance ToJSON Deps where
   toJSON (Deps app back dps) = Object $ H.fromList [ ("app", toJSON app)
                                                    , ("back", toJSON back)
                                                    , ("deps", toJSON dps) ]
 
 instance ToJSON Dep where
-  toJSON (Dep pr t) = Object $ H.fromList [ ("primary", maybe (toJSON $ Text.pack "?") toJSON pr)
-                                          , ("transitive", Array $ V.fromList transitiveJSON) ]
+  toJSON (Dep pr t) = Object $ H.fromList [ ("primary", maybe (toJSON $ Text.empty) toJSON pr)
+                                          , ("transitive", toJSON transitiveJSON) ]
     where
       transitiveList = S.toList t
       transitiveJSON = map (uncurry (inject "source") . (toJSON *** toJSON)) transitiveList
@@ -139,9 +138,9 @@ instance ToJSON Version where
   toJSON (Tag t) = Object $ H.singleton "tag" (toJSON t)
   toJSON (Branch b) = Object $ H.singleton "branch" (toJSON b)
   toJSON (Commit h) = Object $ H.singleton "commit" (toJSON h)
-  toJSON _ = Object $ H.singleton "unknown" (toJSON $ Text.pack "?")
+  toJSON _ = Object $ H.singleton "unknown" (toJSON $ Text.empty)
 
-
+-- json utils
 inject :: Text -> Value -> Value -> Value
 inject k v (Object hm) = Object $ H.insert k v hm
 inject _ _ v = v

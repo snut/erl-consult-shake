@@ -20,7 +20,7 @@ import Development.Shake.Erl.Types
 -- doesn't handle files with first line comment followed by blank line
 
 consultFile :: FilePath -> IO (Either ParseError [ErlTerm])
-consultFile = (return . parse consult "(consult file)". stripComments =<< ) . readFile
+consultFile path = readFile path >>= (return . parse consult path . stripComments)
 
 --maybeConsultFile path = 
 
