@@ -130,7 +130,7 @@ instance ToJSON Dep where
                                           , ("transitive", Array $ V.fromList transitiveJSON) ]
     where
       transitiveList = S.toList t
-      transitiveJSON = map (uncurry (inject "name") . (toJSON *** toJSON)) transitiveList
+      transitiveJSON = map (uncurry (inject "source") . (toJSON *** toJSON)) transitiveList
 
 instance ToJSON Source where
   toJSON (Source url version) = Object $ H.fromList [("url", toJSON url), ("version", toJSON version)]
