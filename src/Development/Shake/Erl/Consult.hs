@@ -36,8 +36,9 @@ trimL = dropWhile (`elem` " \t")
 
 eol = char '\n' <?> "end of line"
 
+termSeq = sepBy erlTerm sepTerm
 endTerm = optional spaces >> char '.' >> optional comment >> optional eol
-sepTerm = optional spaces >> char ',' >> optional comment -- >> optional eol
+sepTerm = optional spaces >> char ',' >> optional comment
 
 consult :: GenParser Char st [ErlTerm]
 consult = endBy erlTerm endTerm
@@ -94,4 +95,3 @@ escapable =  char '"'
 atomContent =  between (char '\'') (char '\'') (many (noneOf "'"))
            <|> ((:) <$> oneOf ['a' .. 'z'] <*> many (oneOf ('_' : ['a' .. 'z'] ++ ['0' .. '9'])))
 
-termSeq = sepBy erlTerm sepTerm

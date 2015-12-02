@@ -1,3 +1,7 @@
 .cabal-sandbox/
 .hg/
+.stack-work/
 dist/
+*.*~
+*.*#
+.#*
